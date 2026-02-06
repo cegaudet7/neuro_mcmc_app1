@@ -2,9 +2,9 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 
-# -------------------------------
-# Utilities for PD correction
-# -------------------------------
+# ======================================================
+# Positive-definite utilities
+# ======================================================
 
 def is_pd(B):
     try:
@@ -15,7 +15,6 @@ def is_pd(B):
 
 
 def nearest_pd(A):
-    """Nearest positive-definite matrix"""
     B = (A + A.T) / 2
     _, s, V = np.linalg.svd(B)
     H = V.T @ np.diag(s) @ V
@@ -36,25 +35,65 @@ def nearest_pd(A):
     return A3
 
 
-# -------------------------------
-# Streamlit App
-# -------------------------------
+# ======================================================
+# Score definitions
+# ======================================================
 
-st.set_page_config(page_title="Neuropsych MCMC Simulator", layout="wide")
-st.title("Neuropsychological MCMC Low-Score Simulator")
+WAIS_INDEX_SCORES = ["VCI", "VSI", "FRI", "WMI", "PSI"]
+WMS_INDEX_SCORES = ["AMI", "VMI", "IMI", "DMI"]
+INDEX_SCORES = WAIS_INDEX_SCORES + WMS_INDEX_SCORES
+
+
+INDEX_MEAN = 100
+INDEX_SD = 15
+
+SUBTEST_MEAN = 10
+SUBTEST_SD = 3
+
+
+# ======================================================
+# Results table
+# ======================================================
+
+def display_results(low_scores_counts, n_sim):
+
+    counts = (
+        pd.Series(low_scores_counts)
+        .value_counts()
+        .sort_index()
+    )
+
+    results = pd.DataFrame({
+        "Low Scores (X)": counts.index,
+        "Point Probability (%)": (counts.values / n_sim) * 100
+    })
+
+    results["Cumulative Probability (% ≥ X)"] = (
+        results["Point Probability (%)"][::-1]
+        .cumsum()[::-1]
+    )
+
+    results["Point Probability (%)"] = results["Point Probability (%)"].round(2)
+    results["Cumulative Probability (% ≥ X)"] = results["Cumulative Probability (% ≥ X)"].round(2)
+
+    st.dataframe(results, use_container_width=True)
+
+
+# ======================================================
+# Streamlit app
+# ======================================================
+
+st.set_page_config(page_title="Neuropsych Base Rate Simulator", layout="wide")
+st.title("Neuropsychological Low-Score Base Rate Simulator")
 
 st.markdown(
     """
-    **Assumptions**
-    - All variables are standardized (mean = 0, SD = 1)
-    - Input file is a **square correlation matrix**
-    - Rows and columns must match exactly
+    **Score Metrics**
+    • Index scores: Mean = 100, SD = 15  
+    • Subtest scores: Mean = 10, SD = 3  
+    • Correlation matrix must be square and numeric  
     """
 )
-
-# -------------------------------
-# Upload correlation matrix
-# -------------------------------
 
 uploaded_file = st.file_uploader(
     "Upload correlation matrix (.xlsx)",
@@ -63,21 +102,15 @@ uploaded_file = st.file_uploader(
 
 if uploaded_file is not None:
 
-    # Read matrix
     corr_df = pd.read_excel(uploaded_file, index_col=0)
-
-    # Force numeric
     corr_df = corr_df.apply(pd.to_numeric, errors="coerce")
-
-    # Drop empty rows/cols
     corr_df = corr_df.dropna(axis=0, how="all").dropna(axis=1, how="all")
 
-    # Basic checks
     if corr_df.shape[0] != corr_df.shape[1]:
         st.error("Correlation matrix must be square.")
         st.stop()
 
-    if not (corr_df.index.equals(corr_df.columns)):
+    if not corr_df.index.equals(corr_df.columns):
         st.error("Row and column labels must match exactly.")
         st.stop()
 
@@ -85,16 +118,12 @@ if uploaded_file is not None:
         st.error("Matrix contains non-numeric or empty cells.")
         st.stop()
 
-    st.success("Correlation matrix loaded successfully.")
-
-    # -------------------------------
-    # Variable selection
-    # -------------------------------
+    st.success("Correlation matrix loaded.")
 
     variables = corr_df.index.tolist()
 
     selected_vars = st.multiselect(
-        "Select indices/subtests to include",
+        "Select variables",
         options=variables,
         default=variables
     )
@@ -103,79 +132,72 @@ if uploaded_file is not None:
         st.warning("Select at least two variables.")
         st.stop()
 
-    # -------------------------------
-    # Simulation parameters
-    # -------------------------------
+    selected_indices = [v for v in selected_vars if v in INDEX_SCORES]
+    selected_subtests = [v for v in selected_vars if v not in INDEX_SCORES]
 
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
 
     with col1:
-        cutoff = st.number_input(
-            "Low-score cutoff (SD units)",
-            value=-1.0,
-            step=0.1
+        index_cutoff = st.number_input(
+            "Index low-score cutoff",
+            value=85,
+            step=1
         )
 
     with col2:
+        subtest_cutoff = st.number_input(
+            "Subtest low-score cutoff",
+            value=7,
+            step=1
+        )
+
+    with col3:
         n_sim = st.number_input(
-            "Number of simulated profiles",
+            "Number of simulations",
             min_value=1000,
             max_value=500000,
             value=100000,
             step=1000
         )
 
-    # -------------------------------
-    # Run simulation
-    # -------------------------------
-
     if st.button("Run Simulation"):
 
-        # Subset correlation matrix
-        corr_sub = corr_df.loc[selected_vars, selected_vars].values
+        st.subheader("Index Score Base Rates")
 
-        # Enforce positive definiteness
-        corr_sub_pd = nearest_pd(corr_sub)
+        if len(selected_indices) >= 2:
+            corr_idx = corr_df.loc[selected_indices, selected_indices].values
+            corr_idx_pd = nearest_pd(corr_idx)
 
-        # Simulate multivariate normal
-        simulated_scores = np.random.multivariate_normal(
-            mean=np.zeros(len(selected_vars)),
-            cov=corr_sub_pd,
-            size=n_sim
-        )
+            z_idx = np.random.multivariate_normal(
+                mean=np.zeros(len(selected_indices)),
+                cov=corr_idx_pd,
+                size=n_sim
+            )
 
-        # Count low scores per profile
-        low_scores_counts = (simulated_scores < cutoff).sum(axis=1)
+            idx_scores = INDEX_MEAN + INDEX_SD * z_idx
+            low_idx = (idx_scores < index_cutoff).sum(axis=1)
 
-        # Results
-        st.subheader("Results")
+            display_results(low_idx, n_sim)
 
-	# Expected value
-	mean_low = low_scores_counts.mean()
-	st.write(f"**Expected number of low scores:** {mean_low:.2f}")
+        else:
+            st.info("At least two index scores required.")
 
-	# Distribution
-	counts = (
-    	pd.Series(low_scores_counts)
-    	.value_counts()
-    	.sort_index()
-	)
+        st.subheader("Subtest Score Base Rates")
 
-	results = pd.DataFrame({
-    	"Low Scores (X)": counts.index,
-    	"Point Probability (%)": (counts.values / n_sim) * 100
-	})
+        if len(selected_subtests) >= 2:
+            corr_sub = corr_df.loc[selected_subtests, selected_subtests].values
+            corr_sub_pd = nearest_pd(corr_sub)
 
-	# Cumulative probability: X or more
-	results["Cumulative Probability (% ≥ X)"] = (
-    	results["Point Probability (%)"][::-1]
-    	.cumsum()[::-1]
-	)
+            z_sub = np.random.multivariate_normal(
+                mean=np.zeros(len(selected_subtests)),
+                cov=corr_sub_pd,
+                size=n_sim
+            )
 
-	# Formatting
-	results["Point Probability (%)"] = results["Point Probability (%)"].round(2)
-	results["Cumulative Probability (% ≥ X)"] = results["Cumulative Probability (% ≥ X)"].round(2)
+            sub_scores = SUBTEST_MEAN + SUBTEST_SD * z_sub
+            low_sub = (sub_scores < subtest_cutoff).sum(axis=1)
 
-	st.dataframe(results, use_container_width=True)
+            display_results(low_sub, n_sim)
 
-        st.success("Simulation completed successfully.")
+        else:
+            st.info("At least two subtests required.")
