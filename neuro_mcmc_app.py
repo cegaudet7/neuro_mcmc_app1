@@ -50,9 +50,11 @@ corr_sub_pd = nearest_pd(corr_sub)
 simulated_scores = np.random.multivariate_normal(
     mean=np.zeros(len(selected_vars)),
     cov=corr_sub_pd,
-    size=n_sim)
-            # Count low scores per participant
-            low_scores_counts = (simulated_scores < cutoff).sum(axis=1)
+    size=n_sim
+)
+            
+# Count low scores per participant
+low_scores_counts = (simulated_scores < cutoff).sum(axis=1)
 
             st.subheader("Simulation Results")
             st.write(f"Number of simulated participants: {n_sim}")
