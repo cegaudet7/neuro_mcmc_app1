@@ -150,20 +150,32 @@ if uploaded_file is not None:
         # Results
         st.subheader("Results")
 
-        mean_low = low_scores_counts.mean()
-        st.write(f"**Expected number of low scores:** {mean_low:.2f}")
+	# Expected value
+	mean_low = low_scores_counts.mean()
+	st.write(f"**Expected number of low scores:** {mean_low:.2f}")
 
-        # Distribution table
-        dist = (
-            pd.Series(low_scores_counts)
-            .value_counts()
-            .sort_index()
-            .rename("Count")
-            .to_frame()
-        )
+	# Distribution
+	counts = (
+    	pd.Series(low_scores_counts)
+    	.value_counts()
+    	.sort_index()
+	)
 
-        dist["Proportion"] = dist["Count"] / n_sim
+	results = pd.DataFrame({
+    	"Low Scores (X)": counts.index,
+    	"Point Probability (%)": (counts.values / n_sim) * 100
+	})
 
-        st.dataframe(dist)
+	# Cumulative probability: X or more
+	results["Cumulative Probability (% ≥ X)"] = (
+    	results["Point Probability (%)"][::-1]
+    	.cumsum()[::-1]
+	)
+
+	# Formatting
+	results["Point Probability (%)"] = results["Point Probability (%)"].round(2)
+	results["Cumulative Probability (% ≥ X)"] = results["Cumulative Probability (% ≥ X)"].round(2)
+
+	st.dataframe(results, use_container_width=True)
 
         st.success("Simulation completed successfully.")
