@@ -13,7 +13,6 @@ def is_pd(B):
     except np.linalg.LinAlgError:
         return False
 
-
 def nearest_pd(A):
     B = (A + A.T) / 2
     _, s, V = np.linalg.svd(B)
@@ -34,29 +33,25 @@ def nearest_pd(A):
 
     return A3
 
-
 # ======================================================
 # Score definitions
 # ======================================================
 
-WAIS_INDEX_SCORES = ["VCI", "VSI", "FRI", "WMI", "PSI"]
-WMS_INDEX_SCORES = ["AMI", "VMI", "IMI", "DMI"]
-INDEX_SCORES = WAIS_INDEX_SCORES + WMS_INDEX_SCORES
-
+INDEX_ABBREVIATIONS = [
+    "VCI", "VSI", "FRI", "WMI", "PSI",
+    "AMI", "VMI", "IMI", "DMI"
+]
 
 INDEX_MEAN = 100
 INDEX_SD = 15
-
 SUBTEST_MEAN = 10
 SUBTEST_SD = 3
 
-
 # ======================================================
-# Results table
+# Results display function
 # ======================================================
 
 def display_results(low_scores_counts, n_sim):
-
     counts = (
         pd.Series(low_scores_counts)
         .value_counts()
@@ -78,7 +73,6 @@ def display_results(low_scores_counts, n_sim):
 
     st.dataframe(results, use_container_width=True)
 
-
 # ======================================================
 # Streamlit app
 # ======================================================
@@ -92,6 +86,7 @@ st.markdown(
     • Index scores: Mean = 100, SD = 15  
     • Subtest scores: Mean = 10, SD = 3  
     • Correlation matrix must be square and numeric  
+    • Low-score cutoffs are interpreted in metric units
     """
 )
 
@@ -123,7 +118,7 @@ if uploaded_file is not None:
     variables = corr_df.index.tolist()
 
     selected_vars = st.multiselect(
-        "Select variables",
+        "Select variables (indices and/or subtests)",
         options=variables,
         default=variables
     )
@@ -132,8 +127,14 @@ if uploaded_file is not None:
         st.warning("Select at least two variables.")
         st.stop()
 
-    selected_indices = [v for v in selected_vars if v in INDEX_SCORES]
-    selected_subtests = [v for v in selected_vars if v not in INDEX_SCORES]
+    # --------------------------------------------------
+    # Identify index vs subtest
+    # --------------------------------------------------
+    def is_index_score(var_name):
+        return any(var_name.strip().endswith(abbrev) for abbrev in INDEX_ABBREVIATIONS)
+
+    selected_indices = [v for v in selected_vars if is_index_score(v)]
+    selected_subtests = [v for v in selected_vars if not is_index_score(v)]
 
     col1, col2, col3 = st.columns(3)
 
