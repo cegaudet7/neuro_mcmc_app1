@@ -1,79 +1,21 @@
-# File: neuro_mcmc_app.py
-
 import streamlit as st
-import pandas as pd
 import numpy as np
+import pandas as pd
 
-st.set_page_config(page_title="Neuropsych Low Score Simulator", layout="wide")
-st.title("Neuropsych Test Low Score Simulator (MCMC)")
+# -------------------------------
+# Utilities for PD correction
+# -------------------------------
 
-# Step 1: Upload correlation matrix
-st.sidebar.header("Step 1: Upload Correlation Matrix")
-uploaded_file = st.sidebar.file_uploader("Upload Excel/CSV correlation matrix", type=["xlsx","csv"])
+def is_pd(B):
+    try:
+        np.linalg.cholesky(B)
+        return True
+    except np.linalg.LinAlgError:
+        return False
 
-if uploaded_file:
-    if uploaded_file.name.endswith(".xlsx"):
-        corr_df = pd.read_excel(uploaded_file, index_col=0)
-    else:
-        corr_df = pd.read_csv(uploaded_file, index_col=0)
-    
-    # Verify symmetry
-    if not np.allclose(corr_df.values, corr_df.values.T):
-        st.warning("Warning: Your correlation matrix is not symmetric!")
-
-    variables = list(corr_df.columns)
-    
-    # Step 2: Select subtests/indices
-    st.sidebar.header("Step 2: Select Subtests/Indices")
-    selected_vars = st.sidebar.multiselect("Select tests to simulate", variables, default=variables)
-
-    if len(selected_vars) < 1:
-        st.warning("Select at least one subtest/index to simulate.")
-    else:
-        corr_sub = corr_df.loc[selected_vars, selected_vars].values
-
-        # Step 3: Set cutoff
-        st.sidebar.header("Step 3: Set cutoff")
-        cutoff = st.sidebar.number_input("Enter cutoff in SD units (e.g., -1 for <1 SD below mean)", value=-1.0, step=0.1)
-
-        # Step 4: Set simulation parameters
-        st.sidebar.header("Step 4: Simulation settings")
-        n_sim = st.sidebar.number_input("Number of simulated participants", value=10000, step=1000)
-        random_seed = st.sidebar.number_input("Random seed", value=42, step=1)
-
-        # Step 5: Run simulation
-        if st.sidebar.button("Run Simulation"):
-            np.random.seed(random_seed)
-            # Generate multivariate normal scores
-corr_sub_pd = nearest_pd(corr_sub)
-
-simulated_scores = np.random.multivariate_normal(
-    mean=np.zeros(len(selected_vars)),
-    cov=corr_sub_pd,
-    size=n_sim
-)
-            
-# Count low scores per participant
-low_scores_counts = (simulated_scores < cutoff).sum(axis=1)
-
-            st.subheader("Simulation Results")
-            st.write(f"Number of simulated participants: {n_sim}")
-            st.write(f"Cutoff: {cutoff} SD")
-            
-            # Expected number of low scores per person
-            expected_low = low_scores_counts.mean()
-            st.write(f"Expected number of low scores per person: {expected_low:.2f}")
-            
-            # Distribution of low scores
-            st.write("Distribution of low scores across simulated participants:")
-            st.bar_chart(pd.Series(low_scores_counts).value_counts().sort_index())
-
-            # Optional: display a table
-            st.write("Example simulated scores (first 10 participants):")
-            st.dataframe(pd.DataFrame(simulated_scores, columns=selected_vars).head(10))
 
 def nearest_pd(A):
-    """Find the nearest positive-definite matrix to A"""
+    """Nearest positive-definite matrix"""
     B = (A + A.T) / 2
     _, s, V = np.linalg.svd(B)
     H = V.T @ np.diag(s) @ V
@@ -94,9 +36,134 @@ def nearest_pd(A):
     return A3
 
 
-def is_pd(B):
-    try:
-        np.linalg.cholesky(B)
-        return True
-    except np.linalg.LinAlgError:
-        return False
+# -------------------------------
+# Streamlit App
+# -------------------------------
+
+st.set_page_config(page_title="Neuropsych MCMC Simulator", layout="wide")
+st.title("Neuropsychological MCMC Low-Score Simulator")
+
+st.markdown(
+    """
+    **Assumptions**
+    - All variables are standardized (mean = 0, SD = 1)
+    - Input file is a **square correlation matrix**
+    - Rows and columns must match exactly
+    """
+)
+
+# -------------------------------
+# Upload correlation matrix
+# -------------------------------
+
+uploaded_file = st.file_uploader(
+    "Upload correlation matrix (.xlsx)",
+    type=["xlsx"]
+)
+
+if uploaded_file is not None:
+
+    # Read matrix
+    corr_df = pd.read_excel(uploaded_file, index_col=0)
+
+    # Force numeric
+    corr_df = corr_df.apply(pd.to_numeric, errors="coerce")
+
+    # Drop empty rows/cols
+    corr_df = corr_df.dropna(axis=0, how="all").dropna(axis=1, how="all")
+
+    # Basic checks
+    if corr_df.shape[0] != corr_df.shape[1]:
+        st.error("Correlation matrix must be square.")
+        st.stop()
+
+    if not (corr_df.index.equals(corr_df.columns)):
+        st.error("Row and column labels must match exactly.")
+        st.stop()
+
+    if corr_df.isna().any().any():
+        st.error("Matrix contains non-numeric or empty cells.")
+        st.stop()
+
+    st.success("Correlation matrix loaded successfully.")
+
+    # -------------------------------
+    # Variable selection
+    # -------------------------------
+
+    variables = corr_df.index.tolist()
+
+    selected_vars = st.multiselect(
+        "Select indices/subtests to include",
+        options=variables,
+        default=variables
+    )
+
+    if len(selected_vars) < 2:
+        st.warning("Select at least two variables.")
+        st.stop()
+
+    # -------------------------------
+    # Simulation parameters
+    # -------------------------------
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        cutoff = st.number_input(
+            "Low-score cutoff (SD units)",
+            value=-1.0,
+            step=0.1
+        )
+
+    with col2:
+        n_sim = st.number_input(
+            "Number of simulated profiles",
+            min_value=1000,
+            max_value=500000,
+            value=100000,
+            step=1000
+        )
+
+    # -------------------------------
+    # Run simulation
+    # -------------------------------
+
+    if st.button("Run Simulation"):
+
+        # Subset correlation matrix
+        corr_sub = corr_df.loc[selected_vars, selected_vars].values
+
+        # Enforce positive definiteness
+        corr_sub_pd = nearest_pd(corr_sub)
+
+        # Simulate multivariate normal
+        simulated_scores = np.random.multivariate_normal(
+            mean=np.zeros(len(selected_vars)),
+            cov=corr_sub_pd,
+            size=n_sim
+        )
+
+        # Count low scores per profile
+        low_scores_counts = (simulated_scores < cutoff).sum(axis=1)
+
+        # Results
+        st.subheader("Results")
+
+        mean_low = low_scores_counts.mean()
+        st.write(f"**Expected number of low scores:** {mean_low:.2f}")
+
+        # Distribution table
+        dist = (
+            pd.Series(low_scores_counts)
+            .value_counts()
+            .sort_index()
+            .rename("Count")
+            .to_frame()
+        )
+
+        dist["Proportion"] = dist["Count"] / n_sim
+
+        st.dataframe(dist)
+
+        st.success("Simulation completed successfully.")
