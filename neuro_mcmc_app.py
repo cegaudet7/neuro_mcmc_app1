@@ -45,9 +45,12 @@ if uploaded_file:
         if st.sidebar.button("Run Simulation"):
             np.random.seed(random_seed)
             # Generate multivariate normal scores
-            simulated_scores = np.random.multivariate_normal(mean=np.zeros(len(selected_vars)),
-                                                             cov=corr_sub,
-                                                             size=n_sim)
+corr_sub_pd = nearest_pd(corr_sub)
+
+simulated_scores = np.random.multivariate_normal(
+    mean=np.zeros(len(selected_vars)),
+    cov=corr_sub_pd,
+    size=n_sim)
             # Count low scores per participant
             low_scores_counts = (simulated_scores < cutoff).sum(axis=1)
 
@@ -66,3 +69,32 @@ if uploaded_file:
             # Optional: display a table
             st.write("Example simulated scores (first 10 participants):")
             st.dataframe(pd.DataFrame(simulated_scores, columns=selected_vars).head(10))
+
+def nearest_pd(A):
+    """Find the nearest positive-definite matrix to A"""
+    B = (A + A.T) / 2
+    _, s, V = np.linalg.svd(B)
+    H = V.T @ np.diag(s) @ V
+    A2 = (B + H) / 2
+    A3 = (A2 + A2.T) / 2
+
+    if is_pd(A3):
+        return A3
+
+    spacing = np.spacing(np.linalg.norm(A))
+    I = np.eye(A.shape[0])
+    k = 1
+    while not is_pd(A3):
+        mineig = np.min(np.real(np.linalg.eigvals(A3)))
+        A3 += I * (-mineig * k**2 + spacing)
+        k += 1
+
+    return A3
+
+
+def is_pd(B):
+    try:
+        np.linalg.cholesky(B)
+        return True
+    except np.linalg.LinAlgError:
+        return False
